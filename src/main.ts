@@ -1,13 +1,18 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { json, urlencoded } from 'express';
+import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  const allowedOrigins = (process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: '*',
+    origin: allowedOrigins.includes('*') ? '*' : allowedOrigins,
   });
 
   app.useGlobalPipes(
@@ -18,11 +23,13 @@ async function bootstrap() {
     }),
   );
 
-  // Aumentar el límite del payload a 50mb (o el tamaño que consideres necesario)
+  // Aumentar el limite del payload para imagenes de invitaciones.
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ extended: true, limit: '50mb' }));
 
-  await app.listen(3000);
-  console.log(`Backend RifaTicket corriendo en http://localhost:3000`);
+  const port = Number(process.env.PORT || 3000);
+  await app.listen(port, '0.0.0.0');
+  console.log(`Backend RifaTicket corriendo en el puerto ${port}`);
 }
+
 bootstrap();

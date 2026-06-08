@@ -15,8 +15,15 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+    it('should return the API name', () => {
+      expect(appController.getHello()).toBe('Fiesta Back API');
+    });
+
+    it('should return health status', () => {
+      expect(appController.getHealth()).toMatchObject({
+        ok: true,
+        service: 'fiesta-back',
+      });
     });
   });
 });

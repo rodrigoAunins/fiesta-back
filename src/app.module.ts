@@ -1,40 +1,58 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ServeStaticModule } from '@nestjs/serve-static';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 
-import { User } from './entities/user.entity';
-import { Raffle } from './entities/raffle.entity';
-import { Ticket } from './entities/ticket.entity';
-import { Prize } from './entities/prize.entity';
-import { SellerAssignment } from './entities/seller-assignment.entity';
-
-// NUEVAS ENTIDADES
-import { RafflePurchase } from './entities/raffle-purchase.entity';
-import { RafflePurchaseItem } from './entities/raffle-purchase-item.entity';
-import { PaymentProof } from './entities/payment-proof.entity';
-import { RaffleAccessPayment } from './entities/raffle-access-payment.entity';
-import { WebhookEvent } from './entities/webhook-event.entity';
-import { Invitation } from './entities/invitation.entity';
-import { GlobalCatalogItem } from './entities/global-catalog-item.entity';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { DoorAssignment } from './entities/door-assignment.entity';
 import { EventGuest } from './entities/event-guest.entity';
-
+import { GlobalCatalogItem } from './entities/global-catalog-item.entity';
+import { Invitation } from './entities/invitation.entity';
+import { PaymentProof } from './entities/payment-proof.entity';
+import { Prize } from './entities/prize.entity';
+import { RaffleAccessPayment } from './entities/raffle-access-payment.entity';
+import { RafflePurchaseItem } from './entities/raffle-purchase-item.entity';
+import { RafflePurchase } from './entities/raffle-purchase.entity';
+import { RaffleSeat } from './entities/raffle-seat.entity';
+import { Raffle } from './entities/raffle.entity';
+import { SellerAssignment } from './entities/seller-assignment.entity';
+import { Ticket } from './entities/ticket.entity';
+import { User } from './entities/user.entity';
+import { WebhookEvent } from './entities/webhook-event.entity';
+import { AccessModule } from './modules/access/access.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CronModule } from './modules/cron/cron.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
+import { RaffleAccessPaymentsModule } from './modules/raffle-access-payments/raffle-access-payments.module';
+import { RafflePurchasesModule } from './modules/raffle-purchases/raffle-purchases.module';
 import { RafflesModule } from './modules/raffles/raffles.module';
 import { SellersModule } from './modules/sellers/sellers.module';
 import { WebsocketsModule } from './modules/websockets/websockets.module';
-import { CronModule } from './modules/cron/cron.module';
 
-// NUEVOS MÓDULOS
-import { RafflePurchasesModule } from './modules/raffle-purchases/raffle-purchases.module';
-import { RaffleAccessPaymentsModule } from './modules/raffle-access-payments/raffle-access-payments.module';
-import { RaffleSeat } from './entities/raffle-seat.entity';
-import { DoorAssignment } from './entities/door-assignment.entity';
-import { AccessModule } from './modules/access/access.module';
-import { AdminModule } from './modules/admin/admin.module';
-import { InvitationsModule } from './modules/invitations/invitations.module';
+const isProduction = process.env.NODE_ENV === 'production';
+const databaseSslEnabled =
+  process.env.DB_SSL === 'true' ||
+  (isProduction && process.env.DB_SSL !== 'false' && Boolean(process.env.DATABASE_URL));
+
+const databaseConfig = process.env.DATABASE_URL
+  ? {
+      type: 'postgres' as const,
+      url: process.env.DATABASE_URL,
+      ssl: databaseSslEnabled ? { rejectUnauthorized: false } : false,
+    }
+  : {
+      type: 'postgres' as const,
+      host: process.env.DB_HOST,
+      port: parseInt(process.env.DB_PORT || '5432', 10),
+      username: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+    };
 
 @Module({
   imports: [
@@ -48,14 +66,7 @@ import { InvitationsModule } from './modules/invitations/invitations.module';
       serveRoot: '/uploads',
     }),
     TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: process.env.DB_HOST,
-      port: parseInt(process.env.DB_PORT || '5432', 10),
-      username: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-
-      // ✅ IMPORTANTE: agregamos nuevas entidades
+      ...databaseConfig,
       entities: [
         User,
         Raffle,
@@ -73,23 +84,20 @@ import { InvitationsModule } from './modules/invitations/invitations.module';
         GlobalCatalogItem,
         EventGuest,
       ],
-
-      synchronize: true, // sigue igual por ahora
+      synchronize: process.env.TYPEORM_SYNCHRONIZE !== 'false',
     }),
-
     AuthModule,
     RafflesModule,
     SellersModule,
-
-    // ✅ nuevos módulos del nuevo flujo
     RafflePurchasesModule,
     RaffleAccessPaymentsModule,
-
     WebsocketsModule,
     CronModule,
     AccessModule,
     AdminModule,
     InvitationsModule,
   ],
+  controllers: [AppController],
+  providers: [AppService],
 })
 export class AppModule {}
