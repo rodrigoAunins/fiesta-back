@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 import { User } from './entities/user.entity';
 import { Raffle } from './entities/raffle.entity';
@@ -15,6 +17,9 @@ import { RafflePurchaseItem } from './entities/raffle-purchase-item.entity';
 import { PaymentProof } from './entities/payment-proof.entity';
 import { RaffleAccessPayment } from './entities/raffle-access-payment.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
+import { Invitation } from './entities/invitation.entity';
+import { GlobalCatalogItem } from './entities/global-catalog-item.entity';
+import { EventGuest } from './entities/event-guest.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { RafflesModule } from './modules/raffles/raffles.module';
@@ -29,13 +34,19 @@ import { RaffleSeat } from './entities/raffle-seat.entity';
 import { DoorAssignment } from './entities/door-assignment.entity';
 import { AccessModule } from './modules/access/access.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true,
-  cache: true,
-  ignoreEnvFile: true, }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      cache: true,
+    }),
     ScheduleModule.forRoot(),
+    ServeStaticModule.forRoot({
+      rootPath: join(process.cwd(), 'uploads'),
+      serveRoot: '/uploads',
+    }),
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST,
@@ -58,6 +69,9 @@ import { AdminModule } from './modules/admin/admin.module';
         PaymentProof,
         RaffleAccessPayment,
         WebhookEvent,
+        Invitation,
+        GlobalCatalogItem,
+        EventGuest,
       ],
 
       synchronize: true, // sigue igual por ahora
@@ -75,6 +89,7 @@ import { AdminModule } from './modules/admin/admin.module';
     CronModule,
     AccessModule,
     AdminModule,
+    InvitationsModule,
   ],
 })
 export class AppModule {}

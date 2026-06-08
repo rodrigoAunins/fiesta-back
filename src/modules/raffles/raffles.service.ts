@@ -29,7 +29,7 @@ import { CreateRaffleDto } from './dto/create-raffle.dto';
 import { FinalizeDrawDto } from './dto/finalize-draw.dto';
 import { CreateDoorStaffDto } from './dto/create-door-staff.dto';
 
-type UserRole = 'creator' | 'seller' | 'door';
+type UserRole = 'master' | 'creator' | 'organizer' | 'guest' | 'seller' | 'door';
 
 type ShareImageResult =
   | { kind: 'binary'; contentType: string; buffer: Buffer }
@@ -81,8 +81,45 @@ export class RafflesService {
     role: UserRole,
     data: CreateRaffleDto,
   ) {
-    if (role !== 'creator') {
+    if (!['master', 'creator', 'organizer'].includes(role)) {
       throw new BadRequestException('Solo el organizador puede crear eventos');
+    }
+
+    const eventName = data.title?.trim();
+
+    if (!eventName) {
+      throw new BadRequestException('El nombre del evento es obligatorio');
+    }
+
+    const finalUser = await this.userRepo.findOne({
+      where: { id: data.finalUserId },
+    });
+
+    if (!finalUser) {
+      throw new BadRequestException('El usuario final seleccionado no existe');
+    }
+
+    if (finalUser.role !== 'guest') {
+      throw new BadRequestException('Debes asociar un usuario final al evento');
+    }
+
+    const requestedOrganizerId = data.organizerId || data.assignedToId || null;
+    let targetCreatorId = creatorId;
+
+    if (role === 'master' && requestedOrganizerId) {
+      const organizer = await this.userRepo.findOne({
+        where: { id: requestedOrganizerId },
+      });
+
+      if (!organizer) {
+        throw new BadRequestException('El organizador seleccionado no existe');
+      }
+
+      if (!['creator', 'organizer'].includes(String(organizer.role))) {
+        throw new BadRequestException('El responsable asignado debe ser organizador');
+      }
+
+      targetCreatorId = organizer.id;
     }
 
     const parsedTotalNumbers =
@@ -144,7 +181,7 @@ export class RafflesService {
 
     try {
       const raffle = qr.manager.create(Raffle, {
-        title: data.title.trim(),
+        title: eventName,
         description: data.desc?.trim() || null,
         ticketPrice: finalTicketPrice.toFixed(2),
         totalNumbers: parsedTotalNumbers,
@@ -171,7 +208,12 @@ export class RafflesService {
         themeTextColor: data.themeTextColor || '#0f172a',
         themeCardColor: data.themeCardColor || '#ffffff',
 
-        creator: { id: creatorId } as any,
+        creator: { id: targetCreatorId } as any,
+        finalUser: { id: finalUser.id } as any,
+        finalUserId: finalUser.id,
+        createdBy: { id: creatorId } as any,
+        createdById: creatorId,
+        createdByRole: role as any,
       });
 
       const saved = await qr.manager.save(raffle);
@@ -319,10 +361,65 @@ export class RafflesService {
   }
 
   async getMyRaffles(userId: string, role: UserRole) {
+    if (role === 'master') {
+      const raffles = await this.raffleRepo.find({
+        relations: ['creator', 'finalUser', 'createdBy', 'tickets', 'prizes', 'sellers', 'doors', 'seats'],
+        order: { createdAt: 'DESC' },
+      });
+
+      return Promise.all(
+        raffles.map(async (raffle) => {
+          const unlock = await this.getUnlockInfo(raffle.id, raffle.totalNumbers);
+
+          return {
+            ...raffle,
+            financials: this.buildFinancials(
+              raffle.tickets || [],
+              raffle.ticketPrice,
+            ),
+            unlock,
+            sellersCount: Array.isArray(raffle.sellers) ? raffle.sellers.length : 0,
+            doorUsersCount: Array.isArray(raffle.doors) ? raffle.doors.length : 0,
+            seatsCount: Array.isArray(raffle.seats) ? raffle.seats.length : 0,
+          };
+        }),
+      );
+    }
+
+    if (role === 'guest') {
+      const raffles = await this.raffleRepo.find({
+        where: { finalUser: { id: userId } },
+        relations: ['creator', 'finalUser', 'createdBy', 'tickets', 'prizes', 'sellers', 'doors', 'seats'],
+        order: { createdAt: 'DESC' },
+      });
+
+      return Promise.all(
+        raffles.map(async (raffle) => {
+          const unlock = await this.getUnlockInfo(raffle.id, raffle.totalNumbers);
+
+          return {
+            ...raffle,
+            financials: this.buildFinancials(
+              raffle.tickets || [],
+              raffle.ticketPrice,
+            ),
+            unlock,
+            sellersCount: Array.isArray(raffle.sellers) ? raffle.sellers.length : 0,
+            doorUsersCount: Array.isArray(raffle.doors) ? raffle.doors.length : 0,
+            seatsCount: Array.isArray(raffle.seats) ? raffle.seats.length : 0,
+          };
+        }),
+      );
+    }
+
+    if (role === 'organizer') {
+      role = 'creator';
+    }
+
     if (role === 'creator') {
       const raffles = await this.raffleRepo.find({
         where: { creator: { id: userId } },
-        relations: ['tickets', 'prizes', 'sellers', 'doors', 'seats'],
+        relations: ['creator', 'finalUser', 'createdBy', 'tickets', 'prizes', 'sellers', 'doors', 'seats'],
         order: { createdAt: 'DESC' },
       });
 
@@ -411,15 +508,25 @@ export class RafflesService {
     creatorId: string,
     actorRole: UserRole,
   ) {
-    if (actorRole !== 'creator') {
+    if (!['master', 'creator', 'organizer', 'guest'].includes(actorRole)) {
       throw new ForbiddenException(
         'Solo el organizador puede acceder al dashboard principal',
       );
     }
 
+    const where =
+      actorRole === 'master'
+        ? { id: raffleId }
+        : actorRole === 'guest'
+          ? { id: raffleId, finalUser: { id: creatorId } }
+          : { id: raffleId, creator: { id: creatorId } };
+
     const raffle = await this.raffleRepo.findOne({
-      where: { id: raffleId, creator: { id: creatorId } },
+      where,
       relations: [
+        'creator',
+        'finalUser',
+        'createdBy',
         'tickets',
         'tickets.seat',
         'prizes',
@@ -458,6 +565,30 @@ export class RafflesService {
       raffleId: raffle.id,
       title: raffle.title,
       description: raffle.description,
+      finalUserId: raffle.finalUserId,
+      finalUser: raffle.finalUser
+        ? {
+            id: raffle.finalUser.id,
+            firstName: raffle.finalUser.firstName,
+            lastName: raffle.finalUser.lastName,
+            fullName: `${raffle.finalUser.firstName} ${raffle.finalUser.lastName}`.trim(),
+            email: raffle.finalUser.email,
+            role: raffle.finalUser.role,
+          }
+        : null,
+      organizerId: (raffle.creator as any)?.id || null,
+      organizer: raffle.creator
+        ? {
+            id: raffle.creator.id,
+            firstName: raffle.creator.firstName,
+            lastName: raffle.creator.lastName,
+            fullName: `${raffle.creator.firstName} ${raffle.creator.lastName}`.trim(),
+            email: raffle.creator.email,
+            role: raffle.creator.role,
+          }
+        : null,
+      createdById: raffle.createdById,
+      createdByRole: raffle.createdByRole,
       mode: raffle.mode,
       drawDate: raffle.drawDate,
       eventEndAt: raffle.eventEndAt,

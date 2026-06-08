@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { User } from '../../entities/user.entity';
+import { isSuperAdminEmail } from './auth.utils';
 
 type JwtPayload = {
   sub: string;
@@ -46,13 +47,20 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       throw new UnauthorizedException('Tu usuario está desactivado');
     }
 
+    const role = isSuperAdminEmail(
+      user.email,
+      this.configService.get<string>('SUPERADMIN_EMAILS'),
+    )
+      ? 'master'
+      : user.role;
+
     return {
       id: user.id,
       firstName: user.firstName,
       lastName: user.lastName,
       fullName: `${user.firstName} ${user.lastName}`.trim(),
       email: user.email,
-      role: user.role,
+      role,
       isActive: user.isActive,
     };
   }

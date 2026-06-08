@@ -5,6 +5,7 @@ import {
   ManyToOne,
   OneToMany,
   CreateDateColumn,
+  JoinColumn,
 } from 'typeorm';
 import { User } from './user.entity';
 import { Ticket } from './ticket.entity';
@@ -13,6 +14,7 @@ import { SellerAssignment } from './seller-assignment.entity';
 import { DoorAssignment } from './door-assignment.entity';
 import { RaffleSeat } from './raffle-seat.entity';
 import { RaffleMode } from '../common/enums/raffle-mode.enum';
+import { UserRole } from '../common/enums/user-role.enum';
 
 @Entity('raffles')
 export class Raffle {
@@ -153,6 +155,29 @@ export class Raffle {
     onDelete: 'CASCADE',
   })
   creator: User;
+
+  @ManyToOne(() => User, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn({ name: 'finalUserId' })
+  finalUser: User | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  finalUserId: string | null;
+
+  @ManyToOne(() => User, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'createdById' })
+  createdBy: User | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  createdById: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  createdByRole: UserRole | null;
 
   @OneToMany(() => Ticket, (ticket) => ticket.raffle)
   tickets: Ticket[];

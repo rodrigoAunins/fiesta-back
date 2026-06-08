@@ -5,6 +5,25 @@ import { User } from '../../entities/user.entity';
 export const normalizeEmail = (value: string) =>
   String(value ?? '').trim().toLowerCase();
 
+export const parseEmailList = (value: string | null | undefined) =>
+  String(value ?? '')
+    .split(',')
+    .map((item) => normalizeEmail(item))
+    .filter(Boolean);
+
+export const isSuperAdminEmail = (
+  email: string | null | undefined,
+  allowedEmails: string | null | undefined,
+) => {
+  const normalizedEmail = normalizeEmail(email ?? '');
+
+  if (!normalizedEmail) {
+    return false;
+  }
+
+  return parseEmailList(allowedEmails).includes(normalizedEmail);
+};
+
 export const normalizeName = (value: string) =>
   String(value ?? '').trim().replace(/\s+/g, ' ');
 

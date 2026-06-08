@@ -3,11 +3,13 @@ import {
   IsBoolean,
   IsHexColor,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsNumberString,
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
   MaxLength,
   Min,
   ValidateIf,
@@ -97,7 +99,9 @@ class CreateSeatDto {
 }
 
 export class CreateRaffleDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
+  @IsNotEmpty({ message: 'El nombre del evento es obligatorio' })
   @MaxLength(160)
   title: string;
 
@@ -193,6 +197,19 @@ export class CreateRaffleDto {
   @IsInt()
   @Min(0)
   chairsPerTable?: number;
+
+  @IsOptional()
+  @IsUUID('4')
+  @MaxLength(80)
+  assignedToId?: string;
+
+  @IsUUID('4', { message: 'Debes asociar un usuario final al evento' })
+  @IsNotEmpty({ message: 'Debes asociar un usuario final al evento' })
+  finalUserId: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  organizerId?: string;
 
   @IsOptional()
   @IsString()

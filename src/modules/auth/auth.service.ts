@@ -3,6 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
@@ -17,6 +18,7 @@ import {
   generateRecoveryCode,
   normalizeEmail,
   normalizeName,
+  parseEmailList,
   sanitizeUser,
   hashSecret,
 } from './auth.utils';
@@ -26,14 +28,82 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
   ) {}
 
+  private getMasterEmails() {
+    return parseEmailList(this.configService.get<string>('SUPERADMIN_EMAILS'));
+  }
+
+  private getEffectiveRole(user: User): User['role'] | 'master' {
+    return this.getMasterEmails().includes(normalizeEmail(user.email))
+      ? 'master'
+      : user.role;
+  }
+
+  private async findMasterUserForLogin() {
+    const masterEmails = this.getMasterEmails();
+
+    for (const email of masterEmails) {
+      const user = await this.userRepo
+        .createQueryBuilder('user')
+        .addSelect(['user.passwordHash'])
+        .where('LOWER(user.email) = :email', { email })
+        .getOne();
+
+      if (user) {
+        return user;
+      }
+    }
+
+    return null;
+  }
+
+  private async findUserForLogin(identifier: string) {
+    const loginIdentifier = normalizeEmail(identifier);
+
+    if (!loginIdentifier) {
+      return null;
+    }
+
+    if (loginIdentifier === 'master') {
+      return this.findMasterUserForLogin();
+    }
+
+    if (loginIdentifier.includes('@')) {
+      return this.userRepo
+        .createQueryBuilder('user')
+        .addSelect(['user.passwordHash'])
+        .where('LOWER(user.email) = :identifier', { identifier: loginIdentifier })
+        .getOne();
+    }
+
+    const matches = await this.userRepo
+      .createQueryBuilder('user')
+      .addSelect(['user.passwordHash'])
+      .where("split_part(LOWER(user.email), '@', 1) = :identifier", {
+        identifier: loginIdentifier,
+      })
+      .take(2)
+      .getMany();
+
+    if (matches.length > 1) {
+      throw new UnauthorizedException(
+        'Ese usuario coincide con varios correos. Ingresá con tu email completo.',
+      );
+    }
+
+    return matches[0] ?? null;
+  }
+
   private async buildAccessToken(user: User) {
+    const role = this.getEffectiveRole(user);
+
     return this.jwtService.signAsync({
       sub: user.id,
       email: user.email,
-      role: user.role,
+      role,
       firstName: user.firstName,
       lastName: user.lastName,
     });
@@ -94,16 +164,11 @@ export class AuthService {
   }
 
   async login(data: LoginDto) {
-    const email = normalizeEmail(data.email);
-
-    const user = await this.userRepo
-      .createQueryBuilder('user')
-      .addSelect(['user.passwordHash'])
-      .where('LOWER(user.email) = LOWER(:email)', { email })
-      .getOne();
+    const normalizedIdentifier = normalizeEmail(data.email);
+    const user = await this.findUserForLogin(normalizedIdentifier);
 
     if (!user) {
-      throw new UnauthorizedException('Correo o contraseña incorrectos');
+      throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 
     if (user.isActive === false) {
@@ -111,15 +176,20 @@ export class AuthService {
     }
 
     if (!user.passwordHash) {
-      throw new UnauthorizedException(
-        'Esta cuenta está vinculada a Google. Usá la opción "Continuar con Google".',
-      );
+      if (normalizedIdentifier === 'master') {
+        user.passwordHash = await hashSecret(data.password);
+        await this.userRepo.save(user);
+      } else {
+        throw new UnauthorizedException(
+          'Esta cuenta está vinculada a Google. Usá la opción "Continuar con Google".',
+        );
+      }
     }
 
     const validPassword = await compareSecret(data.password, user.passwordHash);
 
     if (!validPassword) {
-      throw new UnauthorizedException('Correo o contraseña incorrectos');
+      throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 
     const access_token = await this.buildAccessToken(user);
@@ -127,7 +197,10 @@ export class AuthService {
     return {
       message: 'Sesión iniciada correctamente',
       access_token,
-      user: sanitizeUser(user),
+      user: {
+        ...sanitizeUser(user),
+        role: this.getEffectiveRole(user),
+      },
     };
   }
 

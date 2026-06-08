@@ -21,7 +21,7 @@ type AuthRequest = Request & {
   user: {
     id: string;
     email: string;
-    role: 'creator' | 'seller' | 'door';
+    role: 'master' | 'creator' | 'organizer' | 'guest' | 'seller' | 'door';
     firstName?: string;
     lastName?: string;
     fullName?: string;

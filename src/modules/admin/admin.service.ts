@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -10,10 +10,18 @@ import { RafflePurchase } from '../../entities/raffle-purchase.entity';
 import { RafflePurchaseItem } from '../../entities/raffle-purchase-item.entity';
 import { PaymentProof } from '../../entities/payment-proof.entity';
 import { RaffleAccessPayment } from '../../entities/raffle-access-payment.entity';
+import { GlobalCatalogItem } from '../../entities/global-catalog-item.entity';
 
 import { RafflePurchaseStatus } from '../../common/enums/raffle-purchase-status.enum';
 import { RaffleAccessPaymentStatus } from '../../common/enums/raffle-access-payment-status.enum';
 import { UserRole } from '../../common/enums/user-role.enum';
+import {
+  ensureStrongPassword,
+  hashSecret,
+  isSuperAdminEmail,
+  sanitizeUser,
+} from '../auth/auth.utils';
+import { CreateAdminUserDto } from './dto/create-admin-user.dto';
 
 type AdminOverviewRange = '7d' | '30d' | '90d';
 
@@ -71,6 +79,9 @@ export class AdminService {
 
     @InjectRepository(RaffleAccessPayment)
     private readonly accessPaymentRepo: Repository<RaffleAccessPayment>,
+
+    @InjectRepository(GlobalCatalogItem)
+    private readonly globalCatalogRepo: Repository<GlobalCatalogItem>,
   ) {}
 
   async getOverview(user: any, rawRange?: string) {
@@ -101,23 +112,166 @@ export class AdminService {
     };
   }
 
+  async getUsers(user: any) {
+    this.assertManagerAccess(user);
+
+    const qb = this.userRepo
+      .createQueryBuilder('user')
+      .orderBy('"user"."createdAt"', 'DESC');
+
+    if (!this.isSuperAdmin(user)) {
+      qb.where('"user"."role" IN (:...roles)', {
+        roles: [UserRole.GUEST, UserRole.SELLER, UserRole.DOOR],
+      });
+    }
+
+    const users = await qb.getMany();
+
+    return users.map((item) => {
+      const sanitized = sanitizeUser(item);
+      return {
+        ...sanitized,
+        role: this.isSuperAdmin({ email: item.email }) ? 'master' : sanitized?.role,
+      };
+    });
+  }
+
+  async createUser(user: any, data: CreateAdminUserDto) {
+    this.assertManagerAccess(user);
+
+    if (!this.isSuperAdmin(user) && data.role === UserRole.ORGANIZER) {
+      throw new ForbiddenException('Solo el master puede crear organizadores.');
+    }
+
+    if (!ensureStrongPassword(data.password)) {
+      throw new BadRequestException(
+        'La contraseña debe tener al menos 8 caracteres, una mayúscula y un número',
+      );
+    }
+
+    const exists = await this.userRepo
+      .createQueryBuilder('user')
+      .where('LOWER(user.email) = LOWER(:email)', { email: data.email })
+      .getOne();
+
+    if (exists) {
+      throw new BadRequestException('Ya existe una cuenta con ese correo electrónico');
+    }
+
+    const userToCreate = this.userRepo.create({
+      firstName: data.firstName,
+      lastName: data.lastName,
+      email: data.email,
+      passwordHash: await hashSecret(data.password),
+      googleId: null,
+      recoveryCodeHash: null,
+      recoveryCodeGeneratedAt: null,
+      role: data.role as User['role'],
+      isActive: true,
+      mp_access_token: null,
+      mp_refresh_token: null,
+      mp_user_id: null,
+    });
+
+    const saved = await this.userRepo.save(userToCreate);
+    return sanitizeUser(saved);
+  }
+
+  async getGlobalCatalog(user: any) {
+    if (!user?.id) {
+      throw new ForbiddenException('Sesión inválida.');
+    }
+
+    const items = await this.globalCatalogRepo.find({
+      order: {
+        kind: 'ASC',
+        orderIndex: 'ASC',
+        name: 'ASC',
+      },
+    });
+
+    return items;
+  }
+
+  async createGlobalCatalogItem(user: any, data: any) {
+    this.assertSuperAdminAccess(user);
+
+    const item = this.globalCatalogRepo.create(this.normalizeCatalogInput(data));
+    return this.globalCatalogRepo.save(item);
+  }
+
+  async updateGlobalCatalogItem(user: any, id: string, data: any) {
+    this.assertSuperAdminAccess(user);
+
+    const item = await this.globalCatalogRepo.findOne({ where: { id } });
+    if (!item) {
+      throw new BadRequestException('El item del catálogo no existe.');
+    }
+
+    Object.assign(item, this.normalizeCatalogInput(data));
+    return this.globalCatalogRepo.save(item);
+  }
+
+  async deleteGlobalCatalogItem(user: any, id: string) {
+    this.assertSuperAdminAccess(user);
+
+    const item = await this.globalCatalogRepo.findOne({ where: { id } });
+    if (!item) {
+      throw new BadRequestException('El item del catálogo no existe.');
+    }
+
+    await this.globalCatalogRepo.remove(item);
+    return { success: true };
+  }
+
+  private normalizeCatalogInput(data: any) {
+    const rawKind = String(data?.kind || '').trim().toLowerCase();
+    if (!['provider', 'service'].includes(rawKind)) {
+      throw new BadRequestException('El tipo debe ser provider o service.');
+    }
+    const kind = rawKind as GlobalCatalogItem['kind'];
+
+    const name = String(data?.name || '').trim();
+    if (!name) {
+      throw new BadRequestException('El nombre es obligatorio.');
+    }
+
+    return {
+      kind,
+      name,
+      category: String(data?.category || '').trim() || null,
+      description: String(data?.description || '').trim() || null,
+      phone: String(data?.phone || '').trim() || null,
+      whatsapp: String(data?.whatsapp || '').trim() || null,
+      imageUrl: String(data?.imageUrl || '').trim() || null,
+      isActive: data?.isActive !== false,
+      orderIndex: Number.isFinite(Number(data?.orderIndex)) ? Number(data.orderIndex) : 0,
+    } satisfies Partial<GlobalCatalogItem>;
+  }
+
   private assertSuperAdminAccess(user: any) {
-    const allowedEmails = String(
-      this.configService.get<string>('SUPERADMIN_EMAILS') || '',
-    )
-      .split(',')
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean);
-
-    const userEmail = String(user?.email || '')
-      .trim()
-      .toLowerCase();
-
-    if (!userEmail || !allowedEmails.includes(userEmail)) {
+    if (!this.isSuperAdmin(user)) {
       throw new ForbiddenException(
         'No tenés permisos para acceder al panel maestro.',
       );
     }
+  }
+
+  private assertManagerAccess(user: any) {
+    if (!this.isSuperAdmin(user) && !['organizer', 'creator'].includes(user?.role)) {
+      throw new ForbiddenException('No tenés permisos para administrar usuarios.');
+    }
+  }
+
+  private isSuperAdmin(user: any) {
+    return (
+      user?.isSuperAdmin === true ||
+      user?.role === 'master' ||
+      isSuperAdminEmail(
+        user?.email,
+        this.configService.get<string>('SUPERADMIN_EMAILS'),
+      )
+    );
   }
 
   private resolveDateRange(rawRange?: string): DateRangeContext {

@@ -17,6 +17,7 @@ import { RafflePurchaseItem } from '../../entities/raffle-purchase-item.entity';
 import { PaymentProof } from '../../entities/payment-proof.entity';
 import { RaffleAccessPayment } from '../../entities/raffle-access-payment.entity';
 import { WebhookEvent } from '../../entities/webhook-event.entity';
+import { GlobalCatalogItem } from '../../entities/global-catalog-item.entity';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { WebhookEvent } from '../../entities/webhook-event.entity';
       PaymentProof,
       RaffleAccessPayment,
       WebhookEvent,
+      GlobalCatalogItem,
     ]),
   ],
   controllers: [AdminController],
