@@ -15,7 +15,7 @@ La API local queda en `http://localhost:3000`.
 
 Este repo ya esta preparado para Render:
 
-- Build Command: `npm install && npm run build`
+- Build Command: `npm install --include=dev && npm run build`
 - Start Command: `npm run start:prod`
 - Health Check Path: `/health`
 - Node: `>=20`
@@ -28,7 +28,7 @@ El backend escucha en `process.env.PORT` y en `0.0.0.0`, que es lo que Render ne
 2. Crear un nuevo Web Service desde el repo `fiesta-back`.
 3. Runtime: Node.
 4. Branch: `main`.
-5. Build Command: `npm install && npm run build`.
+5. Build Command: `npm install --include=dev && npm run build`.
 6. Start Command: `npm run start:prod`.
 7. Health Check Path: `/health`.
 8. Crear una base Render Postgres en la misma region.
