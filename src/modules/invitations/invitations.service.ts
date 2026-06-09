@@ -39,6 +39,8 @@ type CompanionPayload = {
   food?: string;
   age?: number | null;
   ageGroup?: string;
+  tableId?: string | null;
+  seatIndex?: number | null;
   email?: string | null;
   phone?: string | null;
 };
@@ -167,6 +169,8 @@ export class InvitationsService {
       food: String(payload?.food || 'Sin restriccion').trim() || 'Sin restriccion',
       age: this.normalizeAge(payload?.age),
       ageGroup: this.normalizeAgeGroup(payload?.ageGroup),
+      tableId: String(payload?.tableId || '').trim() || null,
+      seatIndex: this.normalizeSeatIndex(payload?.seatIndex),
       ...(email ? { email } : {}),
       ...(phone ? { phone } : {}),
     };
