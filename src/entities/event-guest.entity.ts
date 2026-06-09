@@ -29,8 +29,17 @@ export class EventGuest {
   @Column({ type: 'varchar', length: 120, default: 'Sin restriccion' })
   food: string;
 
+  @Column({ type: 'int', nullable: true })
+  age: number | null;
+
+  @Column({ type: 'varchar', length: 20, default: 'adult' })
+  ageGroup: string;
+
   @Column({ type: 'int', default: 0 })
   companions: number;
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  companionsData: Array<Record<string, any>>;
 
   @Column({ type: 'varchar', length: 120, default: 'Sin mesa' })
   table: string;
@@ -49,6 +58,21 @@ export class EventGuest {
 
   @Column({ type: 'varchar', length: 10, default: 'left' })
   side: string;
+
+  @Column({ type: 'varchar', length: 20, default: 'manual' })
+  registrationSource: string;
+
+  @Column({ type: 'varchar', length: 30, default: 'approved' })
+  reviewStatus: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reviewedAt: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  reviewedByUserId: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  rejectionReason: string | null;
 
   @CreateDateColumn({ type: 'timestamp' })
   createdAt: Date;

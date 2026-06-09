@@ -82,6 +82,18 @@ export class InvitationsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post('workspace/:workspaceId/guests/:guestId/review')
+  async reviewGuest(
+    @Req() req: AuthRequest,
+    @Param('workspaceId') workspaceId: string,
+    @Param('guestId') guestId: string,
+    @Body() body: { reviewStatus?: string; rejectionReason?: string | null },
+  ) {
+    const guest = await this.service.reviewGuest(workspaceId, guestId, req.user.id, req.user.role, body || {});
+    return { success: true, guest };
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':workspaceId')
   async createDesign(
     @Req() req: AuthRequest,
