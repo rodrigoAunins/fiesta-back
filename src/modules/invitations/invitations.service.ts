@@ -19,6 +19,8 @@ type GuestPayload = {
   companions?: number;
   companionsData?: CompanionPayload[];
   table?: string;
+  tableId?: string | null;
+  seatIndex?: number | null;
   phone?: string;
   email?: string | null;
   inviteCode?: string;
@@ -145,6 +147,13 @@ export class InvitationsService {
     return 'manual';
   }
 
+  private normalizeSeatIndex(raw: unknown): number | null {
+    if (raw === null || raw === undefined || raw === '') return null;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 0 || value > 500) return null;
+    return value;
+  }
+
   private normalizeCompanionPayload(payload: CompanionPayload, index: number) {
     const name = String(payload?.name || `Acompañante ${index + 1}`).trim() || `Acompañante ${index + 1}`;
     const email = String(payload?.email || '').trim().toLowerCase() || undefined;
@@ -234,6 +243,8 @@ export class InvitationsService {
       companions: companionsData.length,
       companionsData,
       table: String(payload?.table || 'Sin mesa').trim() || 'Sin mesa',
+      tableId: String(payload?.tableId || '').trim() || null,
+      seatIndex: this.normalizeSeatIndex(payload?.seatIndex),
       phone: String(payload?.phone || '-').trim() || '-',
       email,
       inviteCode: String(payload?.inviteCode || this.createInviteCode(email || name)).trim() || this.createInviteCode(name),
@@ -260,6 +271,8 @@ export class InvitationsService {
         ? guest.companionsData.map((item, index) => this.normalizeCompanionPayload(item, index))
         : [],
       table: guest.table,
+      tableId: guest.tableId || undefined,
+      seatIndex: this.normalizeSeatIndex(guest.seatIndex),
       phone: guest.phone,
       email: guest.email || undefined,
       inviteCode: guest.inviteCode,

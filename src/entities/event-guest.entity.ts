@@ -44,6 +44,12 @@ export class EventGuest {
   @Column({ type: 'varchar', length: 120, default: 'Sin mesa' })
   table: string;
 
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  tableId: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  seatIndex: number | null;
+
   @Column({ type: 'varchar', length: 50, default: '-' })
   phone: string;
 
