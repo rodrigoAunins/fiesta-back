@@ -76,6 +76,10 @@ export class InvitationsService {
     }
   }
 
+  private isDraftWorkspace(workspaceId: string): boolean {
+    return String(workspaceId || '').startsWith('draft-');
+  }
+
   private normalizeGuestStatus(raw: unknown): string {
     const value = String(raw || '').trim().toLowerCase();
     if (['confirmado', 'confirmed', 'si', 'sí', 'yes'].includes(value)) return 'confirmed';
@@ -92,6 +96,10 @@ export class InvitationsService {
   }
 
   async listByWorkspace(workspaceId: string, userId: string, role: string): Promise<Invitation[]> {
+    if (this.isDraftWorkspace(workspaceId)) {
+      return [];
+    }
+
     await this.assertWorkspaceAccess(workspaceId, userId, role);
 
     return this.repo.find({
@@ -179,6 +187,10 @@ export class InvitationsService {
   }
 
   async create(workspaceId: string, userId: string, role: string, design: Record<string, any>): Promise<Invitation> {
+    if (this.isDraftWorkspace(workspaceId)) {
+      throw new ForbiddenException('Primero tenes que crear el evento para guardar invitaciones.');
+    }
+
     await this.assertWorkspaceAccess(workspaceId, userId, role);
 
     const name = design?.name || 'Nueva invitacion';
@@ -232,6 +244,10 @@ export class InvitationsService {
   }
 
   async listGuestsByWorkspace(workspaceId: string, userId: string, role: string) {
+    if (this.isDraftWorkspace(workspaceId)) {
+      return [];
+    }
+
     await this.assertWorkspaceAccess(workspaceId, userId, role);
 
     const guests = await this.guestRepo.find({
@@ -243,6 +259,12 @@ export class InvitationsService {
   }
 
   async replaceGuestsByWorkspace(workspaceId: string, userId: string, role: string, guests: GuestPayload[]) {
+    if (this.isDraftWorkspace(workspaceId)) {
+      return Array.isArray(guests)
+        ? guests.map((guest, index) => this.serializeGuest(this.normalizeGuestPayload(guest, index, workspaceId)))
+        : [];
+    }
+
     await this.assertWorkspaceAccess(workspaceId, userId, role);
 
     const normalizedGuests = Array.isArray(guests)
