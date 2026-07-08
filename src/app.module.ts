@@ -38,10 +38,22 @@ const databaseSslEnabled =
   process.env.DB_SSL === 'true' ||
   (isProduction && process.env.DB_SSL !== 'false' && Boolean(process.env.DATABASE_URL));
 
+function normalizeDatabaseUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    if (/^dpg-[a-z0-9-]+-a$/i.test(url.hostname)) {
+      url.hostname = `${url.hostname}.oregon-postgres.render.com`;
+    }
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
 const databaseConfig = process.env.DATABASE_URL
   ? {
       type: 'postgres' as const,
-      url: process.env.DATABASE_URL,
+      url: normalizeDatabaseUrl(process.env.DATABASE_URL),
       ssl: databaseSslEnabled ? { rejectUnauthorized: false } : false,
     }
   : {
