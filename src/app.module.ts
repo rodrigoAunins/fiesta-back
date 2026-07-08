@@ -33,11 +33,6 @@ import { RafflesModule } from './modules/raffles/raffles.module';
 import { SellersModule } from './modules/sellers/sellers.module';
 import { WebsocketsModule } from './modules/websockets/websockets.module';
 
-const isProduction = process.env.NODE_ENV === 'production';
-const databaseSslEnabled =
-  process.env.DB_SSL === 'true' ||
-  (isProduction && process.env.DB_SSL !== 'false' && Boolean(process.env.DATABASE_URL));
-
 function normalizeDatabaseUrl(value: string): string {
   try {
     const url = new URL(value);
@@ -50,11 +45,29 @@ function normalizeDatabaseUrl(value: string): string {
   }
 }
 
-const databaseConfig = process.env.DATABASE_URL
+function isRenderDatabaseUrl(value: string): boolean {
+  try {
+    return normalizeDatabaseUrl(value).includes('.render.com');
+  } catch {
+    return false;
+  }
+}
+
+const normalizedDatabaseUrl = process.env.DATABASE_URL
+  ? normalizeDatabaseUrl(process.env.DATABASE_URL)
+  : undefined;
+const isProduction = process.env.NODE_ENV === 'production';
+const databaseSslEnabled =
+  process.env.DB_SSL === 'true' ||
+  (normalizedDatabaseUrl ? isRenderDatabaseUrl(normalizedDatabaseUrl) : false) ||
+  (isProduction && process.env.DB_SSL !== 'false' && Boolean(normalizedDatabaseUrl));
+
+const databaseConfig = normalizedDatabaseUrl
   ? {
       type: 'postgres' as const,
-      url: normalizeDatabaseUrl(process.env.DATABASE_URL),
+      url: normalizedDatabaseUrl,
       ssl: databaseSslEnabled ? { rejectUnauthorized: false } : false,
+      extra: databaseSslEnabled ? { ssl: { rejectUnauthorized: false } } : undefined,
     }
   : {
       type: 'postgres' as const,
