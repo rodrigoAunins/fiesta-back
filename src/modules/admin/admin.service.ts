@@ -177,6 +177,88 @@ export class AdminService {
     return sanitizeUser(saved);
   }
 
+  async getFinalUserEvents(user: any, finalUserId: string) {
+    this.assertManagerAccess(user);
+    const finalUser = await this.getFinalUser(finalUserId);
+
+    const qb = this.raffleRepo
+      .createQueryBuilder('raffle')
+      .leftJoinAndSelect('raffle.creator', 'creator')
+      .leftJoinAndSelect('raffle.finalUser', 'finalUser')
+      .leftJoinAndSelect('raffle.createdBy', 'createdBy')
+      .where('"raffle"."finalUserId" = :finalUserId', { finalUserId })
+      .orderBy('"raffle"."createdAt"', 'DESC');
+
+    if (!this.isSuperAdmin(user)) {
+      qb.andWhere('("creator"."id" = :managerId OR "createdBy"."id" = :managerId)', {
+        managerId: user.id,
+      });
+    }
+
+    const events = await qb.getMany();
+    return {
+      user: sanitizeUser(finalUser),
+      events: events.map((event) => this.serializeManagedEvent(event)),
+    };
+  }
+
+  async assignFinalUser(user: any, eventId: string, finalUserId: string | null) {
+    this.assertManagerAccess(user);
+    const event = await this.raffleRepo.findOne({
+      where: { id: eventId },
+      relations: ['creator', 'finalUser', 'createdBy'],
+    });
+    if (!event) {
+      throw new BadRequestException('El evento seleccionado no existe.');
+    }
+
+    if (!this.isSuperAdmin(user)) {
+      const canManage = event.creator?.id === user.id || event.createdBy?.id === user.id;
+      if (!canManage) {
+        throw new ForbiddenException('No tenes permisos para modificar este evento.');
+      }
+    }
+
+    if (finalUserId) {
+      const finalUser = await this.getFinalUser(finalUserId);
+      event.finalUser = finalUser;
+      event.finalUserId = finalUser.id;
+    } else {
+      event.finalUser = null;
+      event.finalUserId = null;
+    }
+
+    const saved = await this.raffleRepo.save(event);
+    return this.serializeManagedEvent(saved);
+  }
+
+  private async getFinalUser(id: string) {
+    const finalUser = await this.userRepo.findOne({ where: { id } });
+    if (!finalUser) {
+      throw new BadRequestException('El usuario final seleccionado no existe.');
+    }
+    if (String(finalUser.role) !== UserRole.GUEST) {
+      throw new BadRequestException('El usuario seleccionado no es un usuario final.');
+    }
+    return finalUser;
+  }
+
+  private serializeManagedEvent(event: Raffle) {
+    const finalUser = event.finalUser ? sanitizeUser(event.finalUser) : null;
+    const creator = event.creator ? sanitizeUser(event.creator) : null;
+    return {
+      id: event.id,
+      title: event.title,
+      status: event.status,
+      drawDate: event.drawDate,
+      createdAt: event.createdAt,
+      totalNumbers: event.totalNumbers,
+      finalUserId: event.finalUserId || null,
+      finalUser,
+      creator,
+    };
+  }
+
   async getGlobalCatalog(user: any) {
     if (!user?.id) {
       throw new ForbiddenException('Sesión inválida.');
