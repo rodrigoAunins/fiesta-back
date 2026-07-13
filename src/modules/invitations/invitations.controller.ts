@@ -209,6 +209,15 @@ export class InvitationsController {
     return inv ? this.serialize(inv) : { design: null };
   }
 
+  @Post('public/:slug/guest')
+  async getPublicGuest(
+    @Param('slug') slug: string,
+    @Body() body: { guestToken?: string; email?: string },
+  ) {
+    const guest = await this.service.getPublicGuest(slug, body || {});
+    return { guest };
+  }
+
   @Post('public/:slug/rsvp')
   async confirmPublicRsvp(
     @Param('slug') slug: string,

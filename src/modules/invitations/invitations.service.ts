@@ -216,6 +216,55 @@ export class InvitationsService {
     return this.repo.findOne({ where: { publicSlug: slug, published: true } });
   }
 
+  private getConfiguredCompanions(guest: EventGuest) {
+    const stored = Array.isArray(guest.companionsData)
+      ? guest.companionsData.map((item, index) => this.normalizeCompanionPayload(item, index))
+      : [];
+    if (stored.length) return stored.slice(0, 20);
+
+    const count = Math.max(0, Math.min(20, Number(guest.companions || 0) || 0));
+    return Array.from({ length: count }, (_, index) => this.normalizeCompanionPayload({
+      name: `Acompañante ${index + 1}`,
+      status: 'pending',
+    }, index));
+  }
+
+  private async findPublicGuest(invitation: Invitation, payload: Pick<PublicRsvpPayload, 'guestToken' | 'email'>) {
+    const workspaceId = String(invitation.workspaceId || '');
+    const guestToken = String(payload?.guestToken || '').trim();
+    const normalizedEmail = String(payload?.email || '').trim().toLowerCase();
+    if (!workspaceId || (!guestToken && !normalizedEmail)) return null;
+
+    const guests = await this.guestRepo.find({ where: { workspaceId } });
+    return guests.find((item) => {
+      if (guestToken && (item.id === guestToken || item.inviteCode === guestToken)) return true;
+      return Boolean(normalizedEmail) && String(item.email || '').trim().toLowerCase() === normalizedEmail;
+    }) || null;
+  }
+
+  async getPublicGuest(slug: string, payload: Pick<PublicRsvpPayload, 'guestToken' | 'email'>) {
+    const invitation = await this.getPublic(slug);
+    if (!invitation || !invitation.workspaceId) {
+      throw new NotFoundException('Invitacion no encontrada');
+    }
+
+    const guest = await this.findPublicGuest(invitation, payload);
+    if (!guest) return null;
+
+    const companionsData = this.getConfiguredCompanions(guest);
+    return {
+      name: guest.name,
+      email: guest.email || undefined,
+      phone: guest.phone === '-' ? undefined : guest.phone,
+      gender: this.normalizeGuestGender(guest.gender),
+      food: guest.food,
+      age: guest.age ?? null,
+      ageGroup: this.normalizeAgeGroup(guest.ageGroup),
+      companions: companionsData.length,
+      companionsData,
+    };
+  }
+
   private slugify(value: string): string {
     const base = String(value || 'invitacion')
       .normalize('NFD')
@@ -525,10 +574,7 @@ export class InvitationsService {
     }
 
     const guests = await this.guestRepo.find({ where: { workspaceId } });
-    let guest = guests.find((item) => {
-      if (guestToken && (item.id === guestToken || item.inviteCode === guestToken)) return true;
-      return normalizedEmail && String(item.email || '').trim().toLowerCase() === normalizedEmail;
-    });
+    let guest = await this.findPublicGuest(invitation, payload);
 
     if (!guest) {
       guest = this.normalizeGuestPayload(
@@ -540,7 +586,7 @@ export class InvitationsService {
           food: payload?.food,
           age: payload?.age,
           ageGroup: payload?.ageGroup,
-          companionsData: payload?.confirmCompanions ? payload?.companionsData : [],
+          companionsData: [],
           registrationSource: 'public',
           reviewStatus: 'pending_review',
           status: 'pending',
@@ -559,11 +605,26 @@ export class InvitationsService {
       guest.ageGroup = this.normalizeAgeGroup(payload?.ageGroup || guest.ageGroup);
       guest.reviewStatus = this.normalizeReviewStatus(guest.reviewStatus);
       guest.registrationSource = this.normalizeRegistrationSource(guest.registrationSource);
-      if (payload?.confirmCompanions) {
-        const companionsData = this.normalizeCompanionsData(payload);
-        guest.companionsData = companionsData;
-        guest.companions = companionsData.length;
-      }
+      const configuredCompanions = this.getConfiguredCompanions(guest);
+      const submittedCompanions = Array.isArray(payload?.companionsData)
+        ? payload.companionsData.slice(0, configuredCompanions.length)
+        : [];
+      const configuredIds = new Set(configuredCompanions.map((item) => item.id));
+      const submittedById = new Map(submittedCompanions.map((item) => [String(item?.id || ''), item]));
+      const hasMatchingIds = submittedCompanions.some((item) => configuredIds.has(String(item?.id || '')));
+
+      guest.companionsData = configuredCompanions.map((configured, index) => {
+        const submitted = submittedById.get(configured.id) || (!hasMatchingIds ? submittedCompanions[index] : undefined);
+        if (!submitted) return configured;
+        return this.normalizeCompanionPayload({
+          ...configured,
+          ...submitted,
+          id: configured.id,
+          tableId: configured.tableId,
+          seatIndex: configured.seatIndex,
+        }, index);
+      });
+      guest.companions = configuredCompanions.length;
     }
 
     guest.inviteCode = guest.inviteCode || guestToken || this.createInviteCode(guest.email || guest.name);
