@@ -9,6 +9,7 @@ import { Raffle } from '../../entities/raffle.entity';
 import { randomUUID } from 'crypto';
 import { detectInvitationAsset } from './invitation-asset.utils';
 import type { InvitationAssetKind } from './invitation-asset.utils';
+import { publicGuestMatchScore } from './public-guest-match.utils';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
@@ -229,20 +230,48 @@ export class InvitationsService {
     }, index));
   }
 
-  private async findPublicGuest(invitation: Invitation, payload: Pick<PublicRsvpPayload, 'guestToken' | 'email'>) {
+  private async findPublicGuest(
+    invitation: Invitation,
+    payload: Pick<PublicRsvpPayload, 'guestToken' | 'email' | 'name' | 'phone'>,
+  ) {
     const workspaceId = String(invitation.workspaceId || '');
     const guestToken = String(payload?.guestToken || '').trim();
     const normalizedEmail = String(payload?.email || '').trim().toLowerCase();
-    if (!workspaceId || (!guestToken && !normalizedEmail)) return null;
+    const normalizedName = String(payload?.name || '').trim();
+    const normalizedPhone = String(payload?.phone || '').trim();
+    if (!workspaceId || (!guestToken && !normalizedEmail && (!normalizedName || !normalizedPhone))) return null;
 
     const guests = await this.guestRepo.find({ where: { workspaceId } });
-    return guests.find((item) => {
-      if (guestToken && (item.id === guestToken || item.inviteCode === guestToken)) return true;
-      return Boolean(normalizedEmail) && String(item.email || '').trim().toLowerCase() === normalizedEmail;
-    }) || null;
+    const tokenMatch = guestToken
+      ? guests.find((item) => item.id === guestToken || item.inviteCode === guestToken)
+      : null;
+    if (tokenMatch) return tokenMatch;
+
+    const emailMatch = normalizedEmail
+      ? guests.find((item) => String(item.email || '').trim().toLowerCase() === normalizedEmail)
+      : null;
+    if (emailMatch) return emailMatch;
+
+    const rankedMatches = guests
+      .map((guest) => ({
+        guest,
+        score: publicGuestMatchScore(
+          { name: guest.name, email: guest.email, phone: guest.phone },
+          { name: normalizedName, email: normalizedEmail, phone: normalizedPhone },
+        ),
+      }))
+      .filter((match) => match.score > 0)
+      .sort((left, right) => right.score - left.score);
+
+    if (!rankedMatches.length) return null;
+    if (rankedMatches[1] && rankedMatches[0].score - rankedMatches[1].score <= 2) return null;
+    return rankedMatches[0].guest;
   }
 
-  async getPublicGuest(slug: string, payload: Pick<PublicRsvpPayload, 'guestToken' | 'email'>) {
+  async getPublicGuest(
+    slug: string,
+    payload: Pick<PublicRsvpPayload, 'guestToken' | 'email' | 'name' | 'phone'>,
+  ) {
     const invitation = await this.getPublic(slug);
     if (!invitation || !invitation.workspaceId) {
       throw new NotFoundException('Invitacion no encontrada');
@@ -569,8 +598,8 @@ export class InvitationsService {
     const normalizedPhone = String(payload?.phone || '').trim();
     const guestToken = String(payload?.guestToken || '').trim();
 
-    if (!normalizedEmail && !guestToken) {
-      throw new NotFoundException('Necesitamos email o token del invitado para confirmar la asistencia.');
+    if (!guestToken && !normalizedEmail && (!normalizedName || !normalizedPhone)) {
+      throw new NotFoundException('Necesitamos nombre y telefono para confirmar la asistencia.');
     }
 
     const guests = await this.guestRepo.find({ where: { workspaceId } });

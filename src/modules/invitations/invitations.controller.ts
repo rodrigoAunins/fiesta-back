@@ -212,7 +212,7 @@ export class InvitationsController {
   @Post('public/:slug/guest')
   async getPublicGuest(
     @Param('slug') slug: string,
-    @Body() body: { guestToken?: string; email?: string },
+    @Body() body: { guestToken?: string; email?: string; name?: string; phone?: string },
   ) {
     const guest = await this.service.getPublicGuest(slug, body || {});
     return { guest };
