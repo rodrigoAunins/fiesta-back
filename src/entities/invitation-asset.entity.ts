@@ -15,6 +15,10 @@ export class InvitationAsset {
   @Column({ type: 'varchar', length: 100 })
   workspaceId: string;
 
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  invitationId: string | null;
+
   @Column({ type: 'uuid' })
   creatorId: string;
 
@@ -23,6 +27,9 @@ export class InvitationAsset {
 
   @Column({ type: 'varchar', length: 100 })
   mimeType: string;
+
+  @Column({ type: 'varchar', length: 20, default: 'image' })
+  kind: 'image' | 'gif' | 'audio';
 
   @Column({ type: 'integer' })
   size: number;

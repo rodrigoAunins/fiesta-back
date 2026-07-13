@@ -11,13 +11,13 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
-  Header,
-  StreamableFile,
+  Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { InvitationsService } from './invitations.service';
+import { parseByteRange } from './invitation-asset.utils';
 
 type AuthRequest = Request & {
   user: { id: string; role: string };
@@ -143,15 +143,53 @@ export class InvitationsController {
     return { url };
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/assets')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }))
+  async uploadAsset(
+    @Req() req: AuthRequest,
+    @Param('id') invitationId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const asset = await this.service.uploadAsset(invitationId, req.user.id, req.user.role, file);
+    return { asset };
+  }
+
   @Get('assets/:id')
-  @Header('Cache-Control', 'public, max-age=31536000, immutable')
-  async getAsset(@Param('id') id: string): Promise<StreamableFile> {
+  async getAsset(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
     const asset = await this.service.getAsset(id);
-    return new StreamableFile(asset.data, {
-      type: asset.mimeType,
-      disposition: `inline; filename="${asset.originalName.replace(/["\\]/g, '')}"`,
-      length: asset.size,
-    });
+    const safeName = asset.originalName.replace(/["\\]/g, '');
+    const range = asset.kind === 'audio'
+      ? parseByteRange(req.headers.range, asset.size)
+      : null;
+
+    res.setHeader('Content-Type', asset.mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+    if (asset.kind === 'audio') res.setHeader('Accept-Ranges', 'bytes');
+
+    if (req.headers.range && asset.kind === 'audio' && !range) {
+      res.status(416).setHeader('Content-Range', `bytes */${asset.size}`);
+      res.end();
+      return;
+    }
+
+    if (range) {
+      const chunk = asset.data.subarray(range.start, range.end + 1);
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${asset.size}`);
+      res.setHeader('Content-Length', chunk.length);
+      res.end(chunk);
+      return;
+    }
+
+    res.setHeader('Content-Length', asset.size);
+    res.end(asset.data);
   }
 
   @UseGuards(JwtAuthGuard)

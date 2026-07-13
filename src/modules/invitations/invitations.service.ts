@@ -1,11 +1,17 @@
 import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Invitation } from '../../entities/invitation.entity';
 import { InvitationAsset } from '../../entities/invitation-asset.entity';
 import { EventGuest } from '../../entities/event-guest.entity';
 import { Raffle } from '../../entities/raffle.entity';
 import { randomUUID } from 'crypto';
+import { detectInvitationAsset } from './invitation-asset.utils';
+import type { InvitationAssetKind } from './invitation-asset.utils';
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 
 type GuestPayload = {
   id?: string;
@@ -329,6 +335,47 @@ export class InvitationsService {
   async delete(id: string, userId: string, role: string): Promise<void> {
     const inv = await this.getById(id, userId, role);
     await this.repo.remove(inv);
+    await this.assetRepo.delete({ invitationId: id });
+  }
+
+  private async storeAsset(
+    workspaceId: string,
+    userId: string,
+    invitationId: string | null,
+    file?: Express.Multer.File,
+    allowedKinds: InvitationAssetKind[] = ['image', 'gif', 'audio'],
+  ): Promise<InvitationAsset> {
+    const detected = file?.buffer ? detectInvitationAsset(file.buffer) : null;
+    if (!file?.buffer?.length || !detected || !allowedKinds.includes(detected.kind)) {
+      throw new BadRequestException('El archivo debe ser JPG, PNG, WebP, GIF o MP3 valido.');
+    }
+
+    const maxBytes = detected.kind === 'audio' ? MAX_AUDIO_BYTES : MAX_IMAGE_BYTES;
+    if (file.buffer.length > maxBytes) {
+      throw new BadRequestException(
+        detected.kind === 'audio'
+          ? 'El MP3 no puede superar los 20 MB.'
+          : 'La imagen o GIF no puede superar los 10 MB.',
+      );
+    }
+
+    const originalBaseName = String(file.originalname || `archivo.${detected.extension}`)
+      .replace(/[\\/]/g, '-')
+      .slice(0, 245);
+    const originalName = originalBaseName.includes('.')
+      ? originalBaseName
+      : `${originalBaseName}.${detected.extension}`;
+
+    return this.assetRepo.save(this.assetRepo.create({
+      workspaceId,
+      invitationId,
+      creatorId: userId,
+      originalName,
+      mimeType: detected.mimeType,
+      kind: detected.kind,
+      size: file.buffer.length,
+      data: file.buffer,
+    }));
   }
 
   async uploadImage(
@@ -338,28 +385,53 @@ export class InvitationsService {
     file?: Express.Multer.File,
   ): Promise<string> {
     await this.assertWorkspaceAccess(workspaceId, userId, role);
-
-    if (!file?.buffer?.length || !String(file.mimetype || '').startsWith('image/')) {
-      throw new BadRequestException('El archivo debe ser una imagen valida.');
-    }
-
-    const asset = this.assetRepo.create({
-      workspaceId,
-      creatorId: userId,
-      originalName: String(file.originalname || 'imagen').slice(0, 255),
-      mimeType: String(file.mimetype).slice(0, 100),
-      size: file.buffer.length,
-      data: file.buffer,
-    });
-
-    const saved = await this.assetRepo.save(asset);
+    const saved = await this.storeAsset(workspaceId, userId, null, file, ['image', 'gif']);
     return `/api/invitations/assets/${saved.id}`;
+  }
+
+  async uploadAsset(
+    invitationId: string,
+    userId: string,
+    role: string,
+    file?: Express.Multer.File,
+  ) {
+    const invitation = await this.getById(invitationId, userId, role);
+    const asset = await this.storeAsset(
+      String(invitation.workspaceId || ''),
+      userId,
+      invitation.id,
+      file,
+    );
+
+    return {
+      id: asset.id,
+      url: `/api/invitations/assets/${asset.id}`,
+      mimeType: asset.mimeType,
+      size: asset.size,
+      kind: asset.kind,
+    };
   }
 
   async getAsset(id: string): Promise<InvitationAsset> {
     const asset = await this.assetRepo.findOne({ where: { id } });
     if (!asset) throw new NotFoundException('Imagen no encontrada');
     return asset;
+  }
+
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async cleanupOrphanedAssets(): Promise<void> {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const candidates = await this.assetRepo
+      .createQueryBuilder('asset')
+      .where('asset.invitationId IS NOT NULL')
+      .andWhere('asset.createdAt < :cutoff', { cutoff })
+      .getMany();
+
+    for (const asset of candidates) {
+      const invitation = await this.repo.findOne({ where: { id: String(asset.invitationId) } });
+      const referenced = invitation?.design && JSON.stringify(invitation.design).includes(asset.id);
+      if (!referenced) await this.assetRepo.delete(asset.id);
+    }
   }
 
   async publish(id: string, userId: string, role: string, published: boolean): Promise<Invitation> {
