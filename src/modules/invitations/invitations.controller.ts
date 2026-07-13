@@ -11,6 +11,8 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
+  Header,
+  StreamableFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
@@ -137,8 +139,19 @@ export class InvitationsController {
     @Param('workspaceId') workspaceId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    const url = await this.service.uploadImage(workspaceId, req.user.id, file);
+    const url = await this.service.uploadImage(workspaceId, req.user.id, req.user.role, file);
     return { url };
+  }
+
+  @Get('assets/:id')
+  @Header('Cache-Control', 'public, max-age=31536000, immutable')
+  async getAsset(@Param('id') id: string): Promise<StreamableFile> {
+    const asset = await this.service.getAsset(id);
+    return new StreamableFile(asset.data, {
+      type: asset.mimeType,
+      disposition: `inline; filename="${asset.originalName.replace(/["\\]/g, '')}"`,
+      length: asset.size,
+    });
   }
 
   @UseGuards(JwtAuthGuard)

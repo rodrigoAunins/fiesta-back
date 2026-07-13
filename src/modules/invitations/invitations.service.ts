@@ -1,11 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Invitation } from '../../entities/invitation.entity';
+import { InvitationAsset } from '../../entities/invitation-asset.entity';
 import { EventGuest } from '../../entities/event-guest.entity';
 import { Raffle } from '../../entities/raffle.entity';
-import * as fs from 'fs';
-import * as path from 'path';
 import { randomUUID } from 'crypto';
 
 type GuestPayload = {
@@ -60,8 +59,6 @@ type PublicRsvpPayload = {
 
 @Injectable()
 export class InvitationsService {
-  private readonly uploadDir = path.join(process.cwd(), 'uploads', 'invitations');
-
   constructor(
     @InjectRepository(Invitation)
     private readonly repo: Repository<Invitation>,
@@ -69,14 +66,12 @@ export class InvitationsService {
     @InjectRepository(EventGuest)
     private readonly guestRepo: Repository<EventGuest>,
 
+    @InjectRepository(InvitationAsset)
+    private readonly assetRepo: Repository<InvitationAsset>,
+
     @InjectRepository(Raffle)
     private readonly raffleRepo: Repository<Raffle>,
-  ) {
-    // Ensure upload directory exists
-    if (!fs.existsSync(this.uploadDir)) {
-      fs.mkdirSync(this.uploadDir, { recursive: true });
-    }
-  }
+  ) {}
 
   private async assertWorkspaceAccess(workspaceId: string, userId: string, role: string): Promise<void> {
     if (!workspaceId) {
@@ -336,15 +331,35 @@ export class InvitationsService {
     await this.repo.remove(inv);
   }
 
-  async uploadImage(workspaceId: string, userId: string, file: Express.Multer.File): Promise<string> {
-    const ext = path.extname(file.originalname) || '.png';
-    const filename = `${workspaceId}-${randomUUID().slice(0, 8)}${ext}`;
-    const filePath = path.join(this.uploadDir, filename);
+  async uploadImage(
+    workspaceId: string,
+    userId: string,
+    role: string,
+    file?: Express.Multer.File,
+  ): Promise<string> {
+    await this.assertWorkspaceAccess(workspaceId, userId, role);
 
-    fs.writeFileSync(filePath, file.buffer);
+    if (!file?.buffer?.length || !String(file.mimetype || '').startsWith('image/')) {
+      throw new BadRequestException('El archivo debe ser una imagen valida.');
+    }
 
-    // Return a relative URL that the frontend can use
-    return `/uploads/invitations/${filename}`;
+    const asset = this.assetRepo.create({
+      workspaceId,
+      creatorId: userId,
+      originalName: String(file.originalname || 'imagen').slice(0, 255),
+      mimeType: String(file.mimetype).slice(0, 100),
+      size: file.buffer.length,
+      data: file.buffer,
+    });
+
+    const saved = await this.assetRepo.save(asset);
+    return `/api/invitations/assets/${saved.id}`;
+  }
+
+  async getAsset(id: string): Promise<InvitationAsset> {
+    const asset = await this.assetRepo.findOne({ where: { id } });
+    if (!asset) throw new NotFoundException('Imagen no encontrada');
+    return asset;
   }
 
   async publish(id: string, userId: string, role: string, published: boolean): Promise<Invitation> {

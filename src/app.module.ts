@@ -11,6 +11,7 @@ import { DoorAssignment } from './entities/door-assignment.entity';
 import { EventGuest } from './entities/event-guest.entity';
 import { GlobalCatalogItem } from './entities/global-catalog-item.entity';
 import { Invitation } from './entities/invitation.entity';
+import { InvitationAsset } from './entities/invitation-asset.entity';
 import { PaymentProof } from './entities/payment-proof.entity';
 import { Prize } from './entities/prize.entity';
 import { RaffleAccessPayment } from './entities/raffle-access-payment.entity';
@@ -106,6 +107,7 @@ const databaseConfig = normalizedDatabaseUrl
         RaffleAccessPayment,
         WebhookEvent,
         Invitation,
+        InvitationAsset,
         GlobalCatalogItem,
         EventGuest,
       ],
