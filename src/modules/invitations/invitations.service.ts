@@ -580,6 +580,8 @@ export class InvitationsService {
     guest.rejectionReason = reviewStatus === 'rejected' ? String(payload?.rejectionReason || '').trim() || null : null;
     if (reviewStatus === 'rejected') {
       guest.status = 'absent';
+    } else if (guest.status === 'pending') {
+      guest.status = 'confirmed';
     }
 
     const saved = await this.guestRepo.save(guest);
