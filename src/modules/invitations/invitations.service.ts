@@ -339,6 +339,27 @@ export class InvitationsService {
     });
   }
 
+  private preserveGuestPersistenceMetadata(guest: EventGuest, previous: EventGuest): EventGuest {
+    guest.createdAt = previous.createdAt;
+    guest.registrationSource = previous.registrationSource;
+    guest.reviewStatus = previous.reviewStatus;
+    guest.reviewedAt = previous.reviewedAt;
+    guest.reviewedByUserId = previous.reviewedByUserId;
+    guest.rejectionReason = previous.rejectionReason;
+
+    // An autosave queued before a review response must not undo the confirmation.
+    if (
+      previous.registrationSource === 'public' &&
+      previous.reviewStatus === 'approved' &&
+      guest.status === 'pending' &&
+      ['confirmed', 'present'].includes(previous.status)
+    ) {
+      guest.status = previous.status;
+    }
+
+    return guest;
+  }
+
   private serializeGuest(guest: EventGuest) {
     return {
       id: guest.id,
@@ -552,6 +573,16 @@ export class InvitationsService {
       : [];
 
     await this.guestRepo.manager.transaction(async (manager) => {
+      const existingGuests = await manager.find(EventGuest, { where: { workspaceId } });
+      const existingGuestsById = new Map(existingGuests.map((guest) => [guest.id, guest]));
+
+      normalizedGuests.forEach((guest) => {
+        const previous = existingGuestsById.get(guest.id);
+        if (previous) {
+          this.preserveGuestPersistenceMetadata(guest, previous);
+        }
+      });
+
       await manager.delete(EventGuest, { workspaceId });
       if (normalizedGuests.length) {
         await manager.save(EventGuest, normalizedGuests);
